@@ -1,0 +1,51 @@
+<circuit version="1.1.0-SR2" rev="260312" stepSize="1000000" stepsPS="1000000" NLsteps="100000" reaStep="1000000" animate="0" >
+
+<item itemtype="MCU" CircId="mega32-1" mainComp="false" Show_id="true" Show_Val="false" Pos="-252,-88" rotation="0" hflip="1" vflip="1" label="mega32-1" idLabPos="0,-20" labelrot="0" valLabPos="-16,20" valLabRot="0" Frequency="16 MHz" Program="full_task.hex" Auto_Load="false" saveEepr="true" Logic_Symbol="false" Wdt_enabled="false" MainMcu="true" SerialMon="-1" />
+
+<item itemtype="Fixed Voltage" CircId="Fixed Voltage-5" mainComp="false" Show_id="false" Show_Val="false" Pos="-348,-16" rotation="0" hflip="1" vflip="1" label="Fixed Voltage-5" idLabPos="-64,-24" labelrot="0" valLabPos="-16,8" valLabRot="0" Voltage="5 V" Out="true" />
+
+<item itemtype="Fixed Voltage" CircId="Fixed Voltage-6" mainComp="false" Show_id="false" Show_Val="false" Pos="-336,-128" rotation="0" hflip="1" vflip="1" label="Fixed Voltage-6" idLabPos="-64,-24" labelrot="0" valLabPos="-16,8" valLabRot="0" Voltage="5 V" Out="true" />
+
+<item itemtype="Capacitor" CircId="Capacitor-8" mainComp="false" ShowProp="Capacitance" Show_id="false" Show_Val="true" Pos="-192,-188" rotation="0" hflip="1" vflip="1" label="Capacitor-8" idLabPos="-16,-24" labelrot="0" valLabPos="-12.1739,12.9565" valLabRot="0" Capacitance="10 µF" Resistance="1 µΩ" InitVolt="0 V" ReaStep="0 ns" />
+
+<item itemtype="Ground" CircId="Ground-9" mainComp="false" Show_id="false" Show_Val="false" Pos="-232,-168" rotation="0" hflip="1" vflip="1" label="Ground-9" idLabPos="-16,8" labelrot="0" valLabPos="-16,20" valLabRot="0" />
+
+<item itemtype="Potentiometer" CircId="Potentiometer-10" mainComp="false" ShowProp="Resistance" Show_id="false" Show_Val="true" Pos="-280,-168" rotation="0" hflip="1" vflip="1" label="Potentiometer-10" idLabPos="-16,-40" labelrot="0" valLabPos="15,-20" valLabRot="0" Resistance="1 kΩ" Value_Ohm="289 Ω" Slider="false" Scale="1" />
+
+<item itemtype="Fixed Voltage" CircId="Fixed Voltage-11" mainComp="false" Show_id="false" Show_Val="false" Pos="-336,-168" rotation="0" hflip="1" vflip="1" label="Fixed Voltage-11" idLabPos="-64,-24" labelrot="0" valLabPos="-16,8" valLabRot="0" Voltage="5 V" Out="true" />
+
+<item itemtype="Ground" CircId="Ground-12" mainComp="false" Show_id="false" Show_Val="false" Pos="-248,-144" rotation="0" hflip="1" vflip="1" label="Ground-12" idLabPos="-16,8" labelrot="0" valLabPos="-16,20" valLabRot="0" />
+
+<item itemtype="Voltimeter" CircId="Voltimeter-13" mainComp="false" Show_id="false" Show_Val="false" Pos="-388,-220" rotation="0" hflip="1" vflip="1" label="Voltimeter-13" idLabPos="-24,-40" labelrot="0" valLabPos="-16,20" valLabRot="0" />
+
+<item itemtype="Ground" CircId="Ground-15" mainComp="false" Show_id="false" Show_Val="false" Pos="-256,-208" rotation="0" hflip="1" vflip="1" label="Ground-15" idLabPos="-16,8" labelrot="0" valLabPos="-16,20" valLabRot="0" />
+
+<item itemtype="Aip31068_i2c" CircId="Aip31068_i2c-16" mainComp="false" Show_id="true" Show_Val="false" Pos="-136,-160" rotation="0" hflip="1" vflip="1" label="Aip31068_i2c-16" idLabPos="70,-82" labelrot="0" valLabPos="-16,20" valLabRot="0" Rows="2" Cols="16" Control_Code="62" Frequency="100 _kHz" />
+
+<item itemtype="Node" CircId="Node-14" mainComp="false" Pos="-280,-144" />
+
+<item itemtype="Connector" uid="Connector-30" startpinid="mega32-1-RST" endpinid="Fixed Voltage-5-outnod" pointList="-260,-16,-332,-16" />
+
+<item itemtype="Connector" uid="Connector-36" startpinid="Fixed Voltage-6-outnod" endpinid="mega32-1-PORTV0" pointList="-320,-128,-180,-128,-180,0,-196,0" />
+
+<item itemtype="Connector" uid="Connector-37" startpinid="Capacitor-8-rPin" endpinid="mega32-1-PORTV1" pointList="-176,-188,-168,-188,-168,-16,-196,-16" />
+
+<item itemtype="Connector" uid="Connector-38" startpinid="Ground-9-Gnd" endpinid="Capacitor-8-lPin" pointList="-232,-184,-232,-188,-208,-188" />
+
+<item itemtype="Connector" uid="Connector-40" startpinid="Fixed Voltage-11-outnod" endpinid="Potentiometer-10-PinA" pointList="-320,-168,-296,-168" />
+
+<item itemtype="Connector" uid="Connector-41" startpinid="Voltimeter-13-lPin" endpinid="Node-14-1" pointList="-396,-204,-396,-144,-280,-144" />
+
+<item itemtype="Connector" uid="Connector-42" startpinid="Potentiometer-10-PinM" endpinid="Node-14-0" pointList="-280,-152,-280,-144" />
+
+<item itemtype="Connector" uid="Connector-43" startpinid="Node-14-2" endpinid="mega32-1-PORTA0" pointList="-280,-144,-280,-116,-188,-116,-188,-80,-196,-80" />
+
+<item itemtype="Connector" uid="Connector-44" startpinid="Potentiometer-10-PinB" endpinid="Ground-12-Gnd" pointList="-264,-168,-248,-168,-248,-160" />
+
+<item itemtype="Connector" uid="Connector-45" startpinid="Ground-15-Gnd" endpinid="Voltimeter-13-rPin" pointList="-256,-224,-344,-224,-344,-196,-380,-196,-380,-204" />
+
+<item itemtype="Connector" uid="Connector-46" startpinid="mega32-1-PORTC0" endpinid="mega32-1-PORTC0" pointList="-196,64,-196,64" />
+
+<item itemtype="Connector" uid="Connector-47" startpinid="mega32-1-PORTC1" endpinid="Aip31068_i2c-16PinSDA" pointList="-196,56,-120,56,-120,-152" />
+
+</circuit>
