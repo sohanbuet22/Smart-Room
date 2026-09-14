@@ -313,7 +313,7 @@ int main(void)
             lcd_init();
 
             lcd_set_cursor(0, 0);
-            lcd_string("HELLO  MOSADDEK");
+            lcd_string("PATIENCE!");
 
             lcd_set_cursor(1, 0);
             lcd_string("I2C WORKING!");

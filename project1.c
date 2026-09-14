@@ -14,9 +14,14 @@
 #define DHT_BIT  PD6
 
 /* =========================================================
+   LDR (ANALOG LIGHT SENSOR) CONFIGURATION
+   ========================================================= */
+#define LDR_ADC_CHANNEL 0   // LDR on ADC0 (PA0)
+
+/* =========================================================
    VISITOR COUNTER & LOAD CONTROL VARIABLES
    ========================================================= */
-volatile int count = 0;
+volatile int count = 2;
 volatile uint8_t flag1 = 0, flag2 = 0;
 
 /* =========================================================
@@ -33,26 +38,41 @@ uint8_t lcd_address;
 volatile uint8_t sensor1_triggered = 0;
 volatile uint8_t sensor2_triggered = 0;
 
-ISR(INT0_vect) {
-    if (!sensor2_triggered) {
-        sensor1_triggered = 1; // Entry sequence started
-    } else if (sensor2_triggered) {
-        // Sensor 2 was triggered first, now Sensor 1 triggers -> EXIT COMPLETE
-        if (count > 0) count--;
-        sensor1_triggered = 0;
-        sensor2_triggered = 0;
-    }
+// ISR(INT0_vect) {
+//     if (!sensor2_triggered) {
+//         sensor1_triggered = 1; // Entry sequence started
+//     } else if (sensor2_triggered) {
+//         // Sensor 2 was triggered first, now Sensor 1 triggers -> EXIT COMPLETE
+//         if (count > 0) count--;
+//         sensor1_triggered = 0;
+//         sensor2_triggered = 0;
+//     }
+// }
+
+// ISR(INT1_vect) {
+//     if (!sensor1_triggered) {
+//         sensor2_triggered = 1; // Exit sequence started
+//     } else if (sensor1_triggered) {
+//         // Sensor 1 was triggered first, now Sensor 2 triggers -> ENTRY COMPLETE
+//         count++;
+//         sensor1_triggered = 0;
+//         sensor2_triggered = 0;
+//     }
+// }
+
+/* =========================================================
+   ADC FUNCTIONS (FOR LDR)
+   ========================================================= */
+void adc_init(void) {
+    ADMUX = (1 << REFS0);           // AVCC reference
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
 }
 
-ISR(INT1_vect) {
-    if (!sensor1_triggered) {
-        sensor2_triggered = 1; // Exit sequence started
-    } else if (sensor1_triggered) {
-        // Sensor 1 was triggered first, now Sensor 2 triggers -> ENTRY COMPLETE
-        count++;
-        sensor1_triggered = 0;
-        sensor2_triggered = 0;
-    }
+uint16_t adc_read(uint8_t channel) {
+    ADMUX = (ADMUX & 0xF0) | (channel & 0x0F);
+    ADCSRA |= (1 << ADSC);
+    while (ADCSRA & (1 << ADSC));
+    return ADC;
 }
 
 /* =========================================================
@@ -254,8 +274,7 @@ uint8_t dht11_read(uint8_t *humidity, uint8_t *temperature) {
 
 /* =========================================================
    MAIN APPLICATION
-   ========================================================= 
-========================================================= */
+   ========================================================= */
 int main(void) {
     uint8_t humidity = 0, temperature = 0;
     uint8_t found = 0;
@@ -266,9 +285,17 @@ int main(void) {
     MCUCSR = (1 << JTD);
     MCUCSR = (1 << JTD);
 
-    // Relay/LED output setup (PB0)
-    DDRB |= (1 << PB0);
-    PORTB &= ~(1 << PB0);
+    // LED (PWM - OC0 on PB3) and Fan (PWM - OC2 on PD7) as PWM outputs
+    DDRB |= (1 << PB3);
+    DDRD |= (1 << PD7);
+
+    // Timer0: Fast PWM, non-inverting on OC0 (LED brightness)
+    TCCR0 = (1 << WGM00) | (1 << WGM01) | (1 << COM01) | (1 << CS01);
+    OCR0 = 0;
+
+    // Timer2: Fast PWM, non-inverting on OC2 (Fan speed)
+    TCCR2 = (1 << WGM20) | (1 << WGM21) | (1 << COM21) | (1 << CS21);
+    OCR2 = 0;
 
     // External Interrupts (INT0 on PD2, INT1 on PD3)
     // ISC01=1, ISC00=0 (Falling Edge for INT0)
@@ -282,6 +309,7 @@ int main(void) {
 
     // Initialize I2C and find LCD
     i2c_init();
+    adc_init();
     for (uint8_t addr = 0x20; addr <= 0x27; addr++) {
         if (i2c_device_exists(addr)) {
             lcd_address = addr;
@@ -297,11 +325,25 @@ int main(void) {
     lcd_init();
 
     while (1) {
-        // 1. Control Load (Fan/Light/LED) based on Count
+        // 1. LED brightness (LDR-based) and Fan speed (temp + humidity + count based)
         if (count > 0) {
-            PORTB |= (1 << PB0);
+            uint16_t ldr_val = adc_read(LDR_ADC_CHANNEL);   // 0-1023
+            uint8_t led_duty = 255 - (ldr_val >> 2);        // dark room -> high duty
+            OCR0 = led_duty;
+
+            uint8_t temp_score  = (temperature > 32) ? 255 : (temperature > 28) ? 180 : (temperature > 24) ? 100 : 60;
+            uint8_t hum_score   = (humidity > 70) ? 255 : (humidity > 50) ? 150 : 60;
+            uint8_t count_score = (count >= 4) ? 255 : (count >= 2) ? 150 : 80;
+
+            // Weighted average: temperature 50%, humidity 30%, count 20%
+            uint16_t fan_duty = (temp_score * 5 + hum_score * 3 + count_score * 2) / 10;
+            if (fan_duty > 255) fan_duty = 255;
+            if (fan_duty > 0 && fan_duty < 60) fan_duty = 60; // avoid stalling at very low duty
+
+            OCR2 = (uint8_t)fan_duty;
         } else {
-            PORTB &= ~(1 << PB0);
+            OCR0 = 0;   // LED off
+            OCR2 = 0;   // Fan off
         }
 
         // 2. Timeout logic: Reset flags if someone stands in front of 1 sensor without entering
@@ -339,7 +381,7 @@ int main(void) {
         lcd_set_cursor(1, 0);
         lcd_string("Count: ");
         lcd_number(count);
-        lcd_string("     "); 
+        lcd_string("     ");
 
         _delay_ms(100);
         dht_timer++;

@@ -460,7 +460,7 @@ uint16_t adc_read(uint8_t channel)
 void voltage_to_string(uint16_t adc_value, char *buffer)
 {
     // Actual reference/supply voltage = 3.33 V
-    uint32_t mv = ((uint32_t)adc_value * 3330UL) / 1023UL;
+    uint32_t mv = ((uint32_t)adc_value * 4000UL) / 1023UL;
 
     uint16_t volts = mv / 1000;
     uint16_t decimals = (mv % 1000) / 10;

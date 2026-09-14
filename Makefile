@@ -12,4 +12,4 @@ project1.elf: project1.c
 	$(CC) $(CFLAGS) -o project1.elf project1.c
 
 clean:
-	rm -f project1.elf project1.hex
+	rm -f project1.elf project1=.hex
