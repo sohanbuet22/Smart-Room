@@ -19,10 +19,23 @@
 #define LDR_ADC_CHANNEL 0   // LDR on ADC0 (PA0)
 
 /* =========================================================
+   SERVO (DOOR) CONFIGURATION
+   Servo signal on PD5 (OC1A). Timer1 Fast PWM, TOP = ICR1,
+   prescaler 8 @ 1MHz -> 8us/tick, ICR1=2499 -> ~20ms period.
+   1ms pulse (~0 deg)  = 125 ticks
+   2ms pulse (~180 deg)= 250 ticks
+   Adjust SERVO_CLOSED / SERVO_OPEN to match your door's needed angle.
+   ========================================================= */
+#define SERVO_CLOSED        125   // door closed angle (pulse ticks)
+#define SERVO_OPEN          240   // door open angle (pulse ticks) - increase gradually if needed (max ~250)
+#define DOOR_CLOSE_DELAY    50    // ~5 seconds (loop delay is 100ms)
+
+/* =========================================================
    VISITOR COUNTER & LOAD CONTROL VARIABLES
    ========================================================= */
-volatile int count = 2;
+volatile int count = 0;
 volatile uint8_t flag1 = 0, flag2 = 0;
+volatile uint8_t door_activity = 0;   // set by sensor ISRs, used to trigger door open
 
 /* =========================================================
    I2C LCD / PCF8574 CONFIGURATION
@@ -38,27 +51,29 @@ uint8_t lcd_address;
 volatile uint8_t sensor1_triggered = 0;
 volatile uint8_t sensor2_triggered = 0;
 
-// ISR(INT0_vect) {
-//     if (!sensor2_triggered) {
-//         sensor1_triggered = 1; // Entry sequence started
-//     } else if (sensor2_triggered) {
-//         // Sensor 2 was triggered first, now Sensor 1 triggers -> EXIT COMPLETE
-//         if (count > 0) count--;
-//         sensor1_triggered = 0;
-//         sensor2_triggered = 0;
-//     }
-// }
+ISR(INT0_vect) {
+    door_activity = 1;   // reuse this sensor to also trigger the door
+    if (!sensor2_triggered) {
+        sensor1_triggered = 1; // Entry sequence started
+    } else if (sensor2_triggered) {
+        // Sensor 2 was triggered first, now Sensor 1 triggers -> EXIT COMPLETE
+        if (count > 0) count--;
+        sensor1_triggered = 0;
+        sensor2_triggered = 0;
+    }
+}
 
-// ISR(INT1_vect) {
-//     if (!sensor1_triggered) {
-//         sensor2_triggered = 1; // Exit sequence started
-//     } else if (sensor1_triggered) {
-//         // Sensor 1 was triggered first, now Sensor 2 triggers -> ENTRY COMPLETE
-//         count++;
-//         sensor1_triggered = 0;
-//         sensor2_triggered = 0;
-//     }
-// }
+ISR(INT1_vect) {
+    door_activity = 1;   // reuse this sensor to also trigger the door
+    if (!sensor1_triggered) {
+        sensor2_triggered = 1; // Exit sequence started
+    } else if (sensor1_triggered) {
+        // Sensor 1 was triggered first, now Sensor 2 triggers -> ENTRY COMPLETE
+        count++;
+        sensor1_triggered = 0;
+        sensor2_triggered = 0;
+    }
+}
 
 /* =========================================================
    ADC FUNCTIONS (FOR LDR)
@@ -73,6 +88,27 @@ uint16_t adc_read(uint8_t channel) {
     ADCSRA |= (1 << ADSC);
     while (ADCSRA & (1 << ADSC));
     return ADC;
+}
+
+/* =========================================================
+   SERVO FUNCTIONS
+   ========================================================= */
+void servo_init(void) {
+    DDRD |= (1 << PD5);   // OC1A as output
+
+    // Fast PWM, TOP = ICR1 (mode 14), non-inverting on OC1A
+    TCCR1A = (1 << WGM11) | (1 << COM1A1);
+
+    // Set period and starting position BEFORE the timer clock starts,
+    // so the very first PWM pulse is already correct (no startup glitch/jerk).
+    ICR1  = 2499;           // ~20ms period @ 1MHz/8
+    OCR1A = SERVO_CLOSED;   // start with door closed
+
+    TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11); // prescaler 8, clock starts now
+}
+
+void servo_set(uint16_t ticks) {
+    OCR1A = ticks;
 }
 
 /* =========================================================
@@ -280,6 +316,8 @@ int main(void) {
     uint8_t found = 0;
     uint16_t dht_timer = 0;
     uint16_t timeout_counter = 0;
+    uint16_t door_close_timer = 0;
+    uint8_t door_is_open = 0;
 
     // Disable JTAG
     MCUCSR = (1 << JTD);
@@ -296,6 +334,9 @@ int main(void) {
     // Timer2: Fast PWM, non-inverting on OC2 (Fan speed)
     TCCR2 = (1 << WGM20) | (1 << WGM21) | (1 << COM21) | (1 << CS21);
     OCR2 = 0;
+
+    // Servo (door) setup - Timer1, OC1A on PD5
+    servo_init();
 
     // External Interrupts (INT0 on PD2, INT1 on PD3)
     // ISC01=1, ISC00=0 (Falling Edge for INT0)
@@ -358,7 +399,22 @@ int main(void) {
             timeout_counter = 0;
         }
 
-        // 3. Read DHT11 non-blockingly (~every 2 seconds)
+        // 3. Door control (servo) - open on sensor activity, auto-close after a delay
+        if (door_activity) {
+            servo_set(SERVO_OPEN);
+            door_is_open = 1;
+            door_close_timer = 0;
+            door_activity = 0;
+        } else if (door_is_open) {
+            door_close_timer++;
+            if (door_close_timer > DOOR_CLOSE_DELAY) {
+                servo_set(SERVO_CLOSED);
+                door_is_open = 0;
+                door_close_timer = 0;
+            }
+        }
+
+        // 4. Read DHT11 non-blockingly (~every 2 seconds)
         if (dht_timer >= 20) {
             if (dht11_read(&humidity, &temperature)) {
                 lcd_set_cursor(0, 0);
@@ -377,7 +433,7 @@ int main(void) {
             dht_timer = 0;
         }
 
-        // 4. Update Count Display Line
+        // 5. Update Count Display Line
         lcd_set_cursor(1, 0);
         lcd_string("Count: ");
         lcd_number(count);
