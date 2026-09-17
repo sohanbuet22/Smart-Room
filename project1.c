@@ -17,6 +17,21 @@
    LDR (ANALOG LIGHT SENSOR) CONFIGURATION
    ========================================================= */
 #define LDR_ADC_CHANNEL 0   // LDR on ADC0 (PA0)
+#define GAS_ADC_CHANNEL 1   // Gas sensor (e.g. MQ2/MQ135) analog out on ADC1 (PA1)
+#define GAS_THRESHOLD   400 // ADC value above which gas is considered "detected" - CALIBRATE THIS
+
+/* =========================================================
+   FLAME SENSOR + BUZZER CONFIGURATION
+   Most flame sensor modules output LOW when flame is detected.
+   ========================================================= */
+#define FLAME_DDR   DDRD
+#define FLAME_PORT  PORTD
+#define FLAME_PIN   PIND
+#define FLAME_BIT   PD4
+
+#define BUZZER_DDR  DDRB
+#define BUZZER_PORT PORTB
+#define BUZZER_BIT  PB0
 
 /* =========================================================
    SERVO (DOOR) CONFIGURATION
@@ -327,6 +342,14 @@ int main(void) {
     DDRB |= (1 << PB3);
     DDRD |= (1 << PD7);
 
+    // Flame sensor as input with internal pull-up (module idles HIGH, goes LOW on flame)
+    FLAME_DDR  &= ~(1 << FLAME_BIT);
+    FLAME_PORT |= (1 << FLAME_BIT);
+
+    // Buzzer as output, start OFF
+    BUZZER_DDR  |= (1 << BUZZER_BIT);
+    BUZZER_PORT &= ~(1 << BUZZER_BIT);
+
     // Timer0: Fast PWM, non-inverting on OC0 (LED brightness)
     TCCR0 = (1 << WGM00) | (1 << WGM01) | (1 << COM01) | (1 << CS01);
     OCR0 = 0;
@@ -414,7 +437,18 @@ int main(void) {
             }
         }
 
-        // 4. Read DHT11 non-blockingly (~every 2 seconds)
+        // 4. Gas & Flame safety check - buzzer alarm
+        uint16_t gas_val = adc_read(GAS_ADC_CHANNEL);
+        uint8_t flame_detected = !(FLAME_PIN & (1 << FLAME_BIT)); // active LOW
+        uint8_t gas_detected   = (gas_val > GAS_THRESHOLD);
+
+        if (flame_detected || gas_detected) {
+            BUZZER_PORT |= (1 << BUZZER_BIT);   // buzzer ON
+        } else {
+            BUZZER_PORT &= ~(1 << BUZZER_BIT);  // buzzer OFF
+        }
+
+        // 5. Read DHT11 non-blockingly (~every 2 seconds)
         if (dht_timer >= 20) {
             if (dht11_read(&humidity, &temperature)) {
                 lcd_set_cursor(0, 0);
@@ -433,11 +467,17 @@ int main(void) {
             dht_timer = 0;
         }
 
-        // 5. Update Count Display Line
+        // 6. Update Count Display Line (or safety alert if gas/flame active)
         lcd_set_cursor(1, 0);
-        lcd_string("Count: ");
-        lcd_number(count);
-        lcd_string("     ");
+        if (flame_detected) {
+            lcd_string("!! FIRE ALERT !!");
+        } else if (gas_detected) {
+            lcd_string("!! GAS LEAK !!  ");
+        } else {
+            lcd_string("Count: ");
+            lcd_number(count);
+            lcd_string("     ");
+        }
 
         _delay_ms(100);
         dht_timer++;
