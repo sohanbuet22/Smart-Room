@@ -33,19 +33,16 @@
 #define BUZZER_BIT  PB0
 
 /* =========================================================
-   SERVO (DOOR)
+   SERVO (DOOR) - ONE-WAY OPENING
    ========================================================= */
 #define SERVO_CLOSED        125
 #define SERVO_OPEN          240
 #define DOOR_CLOSE_DELAY    20    // ~2 seconds (loop delay is 100ms)
 
-/* 1 = on fire/gas alarm the door opens even if it is locked (safety).
-   Set to 0 if you want the lock to ALWAYS win. */
 #define FIRE_OVERRIDE_LOCK  1
 
 /* =========================================================
    BLUETOOTH (HC-05 / HC-06) on USART: RXD=PD0, TXD=PD1
-   9600 baud, U2X=1 @ 1MHz -> UBRR = 12 (error ~0.2%)
    ========================================================= */
 #define BT_UBRR 12
 
@@ -53,19 +50,23 @@
    VISITOR COUNTER & CONTROL VARIABLES
    ========================================================= */
 volatile int count = 0;
-volatile uint8_t door_activity = 0;
+volatile uint8_t door_activity = 0; // 1 = trigger open door
 
-// --- Bluetooth manual-control state ---
+// State tracking for directional counting
+// 0 = Idle, 1 = Entering started (S1 first), 2 = Exiting started (S2 first)
+static volatile uint8_t sensor_state = 0; 
+
+// Bluetooth manual-control state
 volatile uint8_t light_manual = 0;   // 0 = AUTO, 1 = MANUAL
-volatile uint8_t light_on     = 0;   // used in manual mode
-volatile uint8_t light_level  = 9;   // 0..9 brightness (manual)
+volatile uint8_t light_on     = 0;
+volatile uint8_t light_level  = 9;
 
 volatile uint8_t fan_manual   = 0;   // 0 = AUTO, 1 = MANUAL
 volatile uint8_t fan_on       = 0;
-volatile uint8_t fan_level    = 9;   // 0..9 speed (manual)
+volatile uint8_t fan_level    = 9;
 
-volatile uint8_t door_locked  = 0;   // 1 = locked (no auto open)
-volatile uint8_t status_req   = 0;   // main loop sends status when set
+volatile uint8_t door_locked  = 0;   // 1 = locked
+volatile uint8_t status_req   = 0;   // request status push
 
 /* =========================================================
    I2C LCD / PCF8574
@@ -77,28 +78,30 @@ volatile uint8_t status_req   = 0;   // main loop sends status when set
 
 uint8_t lcd_address;
 
-volatile uint8_t sensor1_triggered = 0;
-volatile uint8_t sensor2_triggered = 0;
-
-ISR(INT0_vect) {
+/* =========================================================
+   INTERRUPT SERVICE ROUTINES FOR VISITOR COUNTER
+   ========================================================= */
+ISR(INT0_vect) { // Sensor 1 (Outer / Entry sensor)
     if (!door_locked) door_activity = 1;
-    if (!sensor2_triggered) {
-        sensor1_triggered = 1;
-    } else if (sensor2_triggered) {
+
+    if (sensor_state == 0) {
+        sensor_state = 1; // Entry sequence started
+    } else if (sensor_state == 2) {
+        // Sensor 2 was triggered first -> Exiting sequence completed
         if (count > 0) count--;
-        sensor1_triggered = 0;
-        sensor2_triggered = 0;
+        sensor_state = 0; 
     }
 }
 
-ISR(INT1_vect) {
+ISR(INT1_vect) { // Sensor 2 (Inner / Exit sensor)
     if (!door_locked) door_activity = 1;
-    if (!sensor1_triggered) {
-        sensor2_triggered = 1;
-    } else if (sensor1_triggered) {
+
+    if (sensor_state == 0) {
+        sensor_state = 2; // Exit sequence started
+    } else if (sensor_state == 1) {
+        // Sensor 1 was triggered first -> Entry sequence completed
         count++;
-        sensor1_triggered = 0;
-        sensor2_triggered = 0;
+        sensor_state = 0; 
     }
 }
 
@@ -130,19 +133,8 @@ void uart_num(uint16_t n) {
     while (i) uart_putc(buf[--i]);
 }
 
-/*
-   Commands (case-sensitive, single characters):
-     L        light ON            l        light OFF
-     B0..B9   light brightness    X        light back to AUTO
-     F        fan ON              f        fan OFF
-     S0..S9   fan speed           Y        fan back to AUTO
-     A        light + fan AUTO
-     D        door LOCK           U        door UNLOCK (auto mode)
-     O        open door now (only if unlocked)
-     ?        status
-*/
 ISR(USART_RXC_vect) {
-    static char pending = 0;   // 'B' or 'S' waiting for a digit
+    static char pending = 0;
     char c = UDR;
 
     if (c == '\r' || c == '\n' || c == ' ') return;
@@ -164,7 +156,6 @@ ISR(USART_RXC_vect) {
             status_req = 1;
             return;
         }
-        // not a digit -> treat c as a fresh command below
     }
 
     switch (c) {
@@ -190,7 +181,7 @@ ISR(USART_RXC_vect) {
         case 'O': if (!door_locked) door_activity = 1; break;
 
         case '?': break;
-        default:  return;   // unknown char, ignore
+        default:  return;
     }
     status_req = 1;
 }
@@ -246,7 +237,7 @@ void servo_set(uint16_t ticks) {
 }
 
 /* =========================================================
-   I2C
+   I2C & LCD
    ========================================================= */
 void i2c_init(void) {
     TWSR = 0x00;
@@ -280,9 +271,6 @@ uint8_t i2c_device_exists(uint8_t address) {
     return (status == 0x18);
 }
 
-/* =========================================================
-   LCD
-   ========================================================= */
 void lcd_write_port(uint8_t data) {
     i2c_start();
     i2c_write((lcd_address << 1) | 0);
@@ -448,10 +436,10 @@ int main(void) {
     uint8_t humidity = 0, temperature = 0;
     uint8_t found = 0;
     uint16_t dht_timer = 0;
-    uint16_t timeout_counter = 0;
     uint16_t door_close_timer = 0;
     uint8_t door_is_open = 0;
     uint8_t prev_alarm = 0;
+    uint8_t state_reset_timer = 0;
 
     // Disable JTAG
     MCUCSR = (1 << JTD);
@@ -485,7 +473,7 @@ int main(void) {
     MCUCR &= ~((1 << ISC00) | (1 << ISC10));
     GICR  |= (1 << INT0) | (1 << INT1);
 
-    // Bluetooth UART (RX interrupt enabled)
+    // Bluetooth UART
     uart_init();
 
     sei();
@@ -528,9 +516,9 @@ int main(void) {
             else
                 OCR2 = 0;
         } else if (count > 0) {
-            uint8_t temp_score  = (temperature > 32) ? 255 : (temperature > 28) ? 180 : (temperature > 24) ? 100 : 60;
-            uint8_t hum_score   = (humidity > 70) ? 255 : (humidity > 50) ? 150 : 60;
-            uint8_t count_score = (count >= 4) ? 255 : (count >= 2) ? 150 : 80;
+            uint8_t temp_score  = (temperature > 25) ? 255 : (temperature > 22) ? 180 : (temperature > 20) ? 100 : 60;
+            uint8_t hum_score   = (humidity > 60) ? 255 : (humidity > 50) ? 150 : 60;
+            uint8_t count_score = (count >= 4) ? 255 : (count >= 2) ? 150 : 70;
 
             uint16_t fan_duty = (temp_score * 5 + hum_score * 3 + count_score * 2) / 10;
             if (fan_duty > 255) fan_duty = 255;
@@ -541,16 +529,16 @@ int main(void) {
             OCR2 = 0;
         }
 
-        /* ---------- 2. Sensor timeout ---------- */
-        if (sensor1_triggered || sensor2_triggered) {
-            timeout_counter++;
-            if (timeout_counter > 30) {
-                sensor1_triggered = 0;
-                sensor2_triggered = 0;
-                timeout_counter = 0;
+        /* ---------- 2. Sensor state timeout recovery ---------- */
+        // Reset state after 3 seconds if someone triggers S1/S2 but turns around
+        if (sensor_state != 0) {
+            state_reset_timer++;
+            if (state_reset_timer > 30) { 
+                sensor_state = 0;
+                state_reset_timer = 0;
             }
         } else {
-            timeout_counter = 0;
+            state_reset_timer = 0;
         }
 
         /* ---------- 3. Gas & Flame safety ---------- */
@@ -565,27 +553,24 @@ int main(void) {
             BUZZER_PORT &= ~(1 << BUZZER_BIT);
         }
 
-        // Tell the phone once when an alarm starts
         if (emergency && !prev_alarm) {
             uart_puts(flame_detected ? "ALERT: FIRE!\r\n" : "ALERT: GAS LEAK!\r\n");
         }
         prev_alarm = emergency;
 
-        /* ---------- 4. Door control (servo) ---------- */
+        /* ---------- 4. Door control (servo - ONE WAY OPEN) ---------- */
         if (FIRE_OVERRIDE_LOCK && emergency) {
-            // Safety: open the door for evacuation even if locked
             servo_set(SERVO_OPEN);
             door_is_open = 1;
             door_close_timer = 0;
             door_activity = 0;
         } else if (door_locked) {
-            // Locked: keep closed, ignore sensor activity
             servo_set(SERVO_CLOSED);
             door_is_open = 0;
             door_close_timer = 0;
             door_activity = 0;
         } else if (door_activity) {
-            servo_set(SERVO_OPEN);
+            servo_set(SERVO_OPEN); // Always opens to standard SERVO_OPEN position
             door_is_open = 1;
             door_close_timer = 0;
             door_activity = 0;
